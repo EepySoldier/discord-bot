@@ -109,8 +109,10 @@ client.on('messageCreate', async (message) => {
 
                         // Insert video record
                         await db.query(
-                            `INSERT INTO videos (server_id, activity_name, file_url, video_owner) VALUES ($1, $2, $3, $4)`,
-                            [serverDbId, msg.content || 'Unnamed Activity', fileUrl, msg.author.username]
+                            `INSERT INTO videos (server_id, discord_message_id, activity_name, file_url, video_owner)
+                             VALUES ($1, $2, $3, $4, $5)
+                                 ON CONFLICT (discord_message_id) DO NOTHING`,
+                            [serverDbId, msg.id, msg.content || '', fileUrl, msg.author.username]
                         );
 
                         uploadedCount++;
@@ -178,10 +180,12 @@ client.on('messageCreate', async (message) => {
         `, [userId, username]);
 
         // Save video metadata
-        await db.query(`
-            INSERT INTO videos (server_id, activity_name, file_url, video_owner)
-            VALUES ($1, $2, $3, $4)
-        `, [serverDbId, activityName, fileUrl, message.author.username]);
+        await db.query(
+            `INSERT INTO videos (server_id, discord_message_id, activity_name, file_url, video_owner)
+             VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (discord_message_id) DO NOTHING`,
+            [serverDbId, msg.id, msg.content || '', fileUrl, msg.author.username]
+        );
 
         message.react('✅');
         console.log(`📦 Saved video: ${filename}`);
