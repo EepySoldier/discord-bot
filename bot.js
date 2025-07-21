@@ -5,7 +5,6 @@ const db = require('./db');
 const { downloadVideo } = require('./downloader');
 const { uploadToR2 } = require('./uploadToR2');
 const path = require('path');
-const { compressVideo } = require('./compressVideo');
 const fs = require('fs').promises;
 
 const client = new Client({
@@ -70,18 +69,11 @@ client.on('messageCreate', async (message) => {
         const fileExt = path.extname(attachment.name || '.mp4');
         const filename = `${message.id}_${timestamp}${fileExt}`;
 
-        // Download original video
         const filepath = await downloadVideo(attachment.url, filename);
-
-        // Compress video (returns compressed file path)
-        const compressedPath = await compressVideo(filepath);
-
-        // Upload compressed video to R2 (using original filename)
-        const fileUrl = await uploadToR2(compressedPath, filename);
+        const fileUrl = await uploadToR2(filepath, filename);
 
         // Clean up temp files
         await fs.unlink(filepath);
-        await fs.unlink(compressedPath);
 
         const serverDbId = rows[0].id;
         const userId = message.author.id;
