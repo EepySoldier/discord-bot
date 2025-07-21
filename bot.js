@@ -1,3 +1,4 @@
+// bot.js (snippet with changes only)
 const { Client, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
 const db = require('./db');
@@ -5,6 +6,7 @@ const { downloadVideo } = require('./downloader');
 const { uploadToR2 } = require('./uploadToR2');
 const path = require('path');
 const { compressVideo } = require('./compressVideo');
+const fs = require('fs').promises;
 
 const client = new Client({
     intents: [
@@ -68,11 +70,16 @@ client.on('messageCreate', async (message) => {
         const fileExt = path.extname(attachment.name || '.mp4');
         const filename = `${message.id}_${timestamp}${fileExt}`;
 
+        // Download original video
         const filepath = await downloadVideo(attachment.url, filename);
+
+        // Compress video (returns compressed file path)
         const compressedPath = await compressVideo(filepath);
+
+        // Upload compressed video to R2 (using original filename)
         const fileUrl = await uploadToR2(compressedPath, filename);
 
-        const fs = require('fs').promises;
+        // Clean up temp files
         await fs.unlink(filepath);
         await fs.unlink(compressedPath);
 
@@ -87,7 +94,7 @@ client.on('messageCreate', async (message) => {
                 ON CONFLICT (discord_user_id) DO NOTHING
         `, [userId, username]);
 
-        // Save video
+        // Save video metadata
         await db.query(`
             INSERT INTO videos (server_id, activity_name, file_url, video_owner)
             VALUES ($1, $2, $3, $4)
