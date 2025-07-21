@@ -4,6 +4,7 @@ const db = require('./db');
 const { downloadVideo } = require('./downloader');
 const { uploadToR2 } = require('./uploadToR2');
 const path = require('path');
+const { compressVideo } = require('./compressVideo');
 
 const client = new Client({
     intents: [
@@ -68,10 +69,12 @@ client.on('messageCreate', async (message) => {
         const filename = `${message.id}_${timestamp}${fileExt}`;
 
         const filepath = await downloadVideo(attachment.url, filename);
-        const fileUrl = await uploadToR2(filepath, filename);
+        const compressedPath = await compressVideo(filepath);
+        const fileUrl = await uploadToR2(compressedPath, filename);
 
         const fs = require('fs').promises;
         await fs.unlink(filepath);
+        await fs.unlink(compressedPath);
 
         const serverDbId = rows[0].id;
         const userId = message.author.id;
