@@ -89,21 +89,6 @@ client.on('messageCreate', async (message) => {
                         continue; // skip non-video
                     }
 
-                    // Check if this video was already synced (avoid duplicates)
-                    const existing = await db.query(
-                        `SELECT 1 FROM videos WHERE file_url = $1 LIMIT 1`,
-                        [attachment.url]
-                    );
-                    if (existing.rowCount > 0) {
-                        // Already synced, react and skip
-                        try {
-                            await msg.react('✅');
-                        } catch (reactErr) {
-                            console.error('Failed to add reaction on already synced video:', reactErr);
-                        }
-                        continue;
-                    }
-
                     // Sync the video
                     const timestamp = Date.now();
                     const fileExt = path.extname(attachment.name || '.mp4');
