@@ -70,6 +70,9 @@ client.on('messageCreate', async (message) => {
         const filepath = await downloadVideo(attachment.url, filename);
         const fileUrl = await uploadToR2(filepath, filename);
 
+        const fs = require('fs').promises;
+        await fs.unlink(filepath);
+
         const serverDbId = rows[0].id;
         const userId = message.author.id;
         const username = message.author.tag;

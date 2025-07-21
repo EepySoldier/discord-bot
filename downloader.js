@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 async function downloadVideo(url, filename) {
-    const filepath = path.join(__dirname, 'videos', filename);
+    const filepath = path.join('/tmp', filename);
     const writer = fs.createWriteStream(filepath);
 
     const response = await axios({
