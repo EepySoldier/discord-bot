@@ -72,7 +72,7 @@ client.on('messageCreate', async (message) => {
             message.reply('🔄 Syncing videos... this may take a while.');
 
             while (true) {
-                const options = {limit: 100};
+                const options = {limit: 5};
                 if (lastId) options.before = lastId;
 
                 const messages = await message.channel.messages.fetch(options);
