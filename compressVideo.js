@@ -20,7 +20,8 @@ function compressVideo(inputPath) {
 
         ffmpeg(inputPath)
             .videoCodec('libx264')
-            .outputOptions('-crf 28')
+            .outputOptions('-crf 40')
+            .size('1280x720')
             .on('error', (err) => {
                 console.error('FFmpeg error:', err);
                 reject(err);
