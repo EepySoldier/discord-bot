@@ -2,7 +2,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
 const db = require('./db');
 const { downloadVideo } = require('./downloader');
-const fs = require('fs');
+const { uploadToR2 } = require('./uploadToR2');
 const path = require('path');
 
 const client = new Client({
@@ -13,15 +13,49 @@ const client = new Client({
     ],
 });
 
+const prefix = "ab!";
+
 client.once('ready', () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (message.channel.id !== process.env.TARGET_CHANNEL_ID) return;
+    if (message.author.bot || !message.guild) return;
 
-    const activityName = message.content.trim();
+    const content = message.content.trim();
+
+    // --- Handle !setup ---
+    if (content === `${prefix}channel`) {
+        try {
+            const owner = await message.guild.fetchOwner();
+            if (message.author.id !== owner.id) {
+                return message.reply('❌ Only the server owner can configure the bot.');
+            }
+
+            await db.query(`
+                INSERT INTO servers (discord_server_id, name, access_code, password_hash, target_channel_id, owner_id)
+                VALUES ($1, $2, 'placeholder', 'placeholder', $3, $4)
+                    ON CONFLICT (discord_server_id)
+    DO UPDATE SET name = $2, target_channel_id = $3, owner_id = $4
+            `, [message.guild.id, message.guild.name, message.channel.id, owner.id]);
+
+            return message.reply(`✅ This channel is now set as the upload channel.`);
+        } catch (err) {
+            console.error('Error during setup:', err);
+            return message.reply('❌ Failed to configure the bot.');
+        }
+    }
+
+    // --- Check if channel is the configured upload channel ---
+    const { rows } = await db.query(
+        `SELECT id, target_channel_id FROM servers WHERE discord_server_id = $1`,
+        [message.guild.id]
+    );
+
+    if (!rows.length || rows[0].target_channel_id !== message.channel.id) return;
+
+    // --- Video upload handling ---
+    const activityName = content;
     const attachment = message.attachments.first();
 
     if (!attachment || !attachment.contentType?.startsWith('video')) {
@@ -34,53 +68,27 @@ client.on('messageCreate', async (message) => {
         const filename = `${message.id}_${timestamp}${fileExt}`;
 
         const filepath = await downloadVideo(attachment.url, filename);
+        const fileUrl = await uploadToR2(filepath, filename);
 
-        // Insert into database
-        const serverId = message.guild.id;
+        const serverDbId = rows[0].id;
         const userId = message.author.id;
         const username = message.author.tag;
-        const fileUrl = `/videos/${filename}`; // path for future serving
 
         // Ensure user exists
-        await db.query(
-            `
-      INSERT INTO users (discord_user_id, username)
-      VALUES ($1, $2)
-      ON CONFLICT (discord_user_id) DO NOTHING
-      `,
-            [userId, username]
-        );
+        await db.query(`
+            INSERT INTO users (discord_user_id, username)
+            VALUES ($1, $2)
+                ON CONFLICT (discord_user_id) DO NOTHING
+        `, [userId, username]);
 
-        // Ensure server exists
-        await db.query(
-            `
-      INSERT INTO servers (discord_server_id, name, access_code, password_hash)
-      VALUES ($1, $2, 'placeholder', 'placeholder')
-      ON CONFLICT (discord_server_id) DO NOTHING
-      `,
-            [serverId, message.guild.name]
-        );
-
-        const { rows: userRows } = await db.query(
-            `SELECT id FROM users WHERE discord_user_id = $1`,
-            [userId]
-        );
-        const uploaderId = userRows[0].id;
-
-        const { rows: serverRows } = await db.query(
-            `SELECT id FROM servers WHERE discord_server_id = $1`,
-            [serverId]
-        );
-        const serverDbId = serverRows[0].id;
-
-        await db.query(
-            `INSERT INTO videos (uploader_id, server_id, activity_name, file_url)
-       VALUES ($1, $2, $3, $4)`,
-            [uploaderId, serverDbId, activityName, fileUrl]
-        );
+        // Save video
+        await db.query(`
+            INSERT INTO videos (server_id, activity_name, file_url)
+            VALUES ($1, $2, $3)
+        `, [serverDbId, activityName, fileUrl]);
 
         message.react('✅');
-        console.log(`Saved video: ${filename}`);
+        console.log(`📦 Saved video: ${filename}`);
     } catch (err) {
         console.error('Error saving video:', err);
         message.reply('❌ Failed to save video.');
