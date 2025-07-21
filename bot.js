@@ -108,6 +108,11 @@ client.on('messageCreate', async (message) => {
 
                         uploadedCount++;
                         console.log(`📦 Synced video from ${msg.author.tag}`);
+                        try {
+                            await msg.react('✅');
+                        } catch (reactErr) {
+                            console.error('Failed to add reaction:', reactErr);
+                        }
                     } catch (err) {
                         console.error('❌ Failed to sync a message:', err);
                     }
