@@ -53,36 +53,58 @@ client.on('messageCreate', async (message) => {
                 return message.reply('❌ Only the server owner can sync old videos.');
             }
 
-            const {rows} = await db.query(
-                `SELECT id, target_channel_id
-                 FROM servers
-                 WHERE discord_server_id = $1`,
+            // Get server config
+            const { rows } = await db.query(
+                `SELECT id, target_channel_id FROM servers WHERE discord_server_id = $1`,
                 [message.guild.id]
             );
-
             if (!rows.length || rows[0].target_channel_id !== message.channel.id) {
                 return message.reply('❌ This channel is not configured for uploads.');
             }
-
             const serverDbId = rows[0].id;
+
             let lastId = null;
             let fetchedCount = 0;
             let uploadedCount = 0;
+            const batchSize = 5;
 
-            message.reply('🔄 Syncing videos... this may take a while.');
+            await message.reply('🔄 Syncing videos... this may take a while.');
 
             while (true) {
-                const options = {limit: 1};
-                if (lastId) options.before = lastId;
+                const fetchOptions = { limit: batchSize };
+                if (lastId) fetchOptions.before = lastId;
 
-                const messages = await message.channel.messages.fetch(options);
+                const messages = await message.channel.messages.fetch(fetchOptions);
                 if (messages.size === 0) break;
 
-                for (const msg of messages.values()) {
-                    lastId = msg.id;
-                    const attachment = msg.attachments.first();
-                    if (!attachment || !attachment.contentType?.startsWith('video')) continue;
+                // Process from oldest to newest within the batch for chronological order
+                const msgsArray = Array.from(messages.values()).reverse();
 
+                for (const msg of msgsArray) {
+                    lastId = msg.id;
+                    fetchedCount++;
+
+                    const attachment = msg.attachments.first();
+                    if (!attachment || !attachment.contentType?.startsWith('video')) {
+                        continue; // skip non-video
+                    }
+
+                    // Check if this video was already synced (avoid duplicates)
+                    const existing = await db.query(
+                        `SELECT 1 FROM videos WHERE file_url = $1 LIMIT 1`,
+                        [attachment.url]
+                    );
+                    if (existing.rowCount > 0) {
+                        // Already synced, react and skip
+                        try {
+                            await msg.react('✅');
+                        } catch (reactErr) {
+                            console.error('Failed to add reaction on already synced video:', reactErr);
+                        }
+                        continue;
+                    }
+
+                    // Sync the video
                     const timestamp = Date.now();
                     const fileExt = path.extname(attachment.name || '.mp4');
                     const filename = `${msg.id}_${timestamp}${fileExt}`;
@@ -90,24 +112,26 @@ client.on('messageCreate', async (message) => {
                     try {
                         const filepath = await downloadVideo(attachment.url, filename);
                         const fileUrl = await uploadToR2(filepath, filename);
-                        const fs = require('fs').promises;
                         await fs.unlink(filepath);
 
+                        // Insert user if not exists
                         const userId = msg.author.id;
                         const username = msg.author.tag;
+                        await db.query(
+                            `INSERT INTO users (discord_user_id, username) VALUES ($1, $2) ON CONFLICT (discord_user_id) DO NOTHING`,
+                            [userId, username]
+                        );
 
-                        await db.query(`
-                            INSERT INTO users (discord_user_id, username)
-                            VALUES ($1, $2) ON CONFLICT (discord_user_id) DO NOTHING
-                        `, [userId, username]);
-
-                        await db.query(`
-                            INSERT INTO videos (server_id, activity_name, file_url, video_owner)
-                            VALUES ($1, $2, $3, $4)
-                        `, [serverDbId, msg.content || 'Unnamed Activity', fileUrl, msg.author.username]);
+                        // Insert video record
+                        await db.query(
+                            `INSERT INTO videos (server_id, activity_name, file_url, video_owner) VALUES ($1, $2, $3, $4)`,
+                            [serverDbId, msg.content || 'Unnamed Activity', fileUrl, msg.author.username]
+                        );
 
                         uploadedCount++;
                         console.log(`📦 Synced video from ${msg.author.tag}`);
+
+                        // React with ✅
                         try {
                             await msg.react('✅');
                         } catch (reactErr) {
@@ -116,14 +140,13 @@ client.on('messageCreate', async (message) => {
                     } catch (err) {
                         console.error('❌ Failed to sync a message:', err);
                     }
-
-                    fetchedCount++;
                 }
 
-                if (messages.size < 100) break;
+                // If fewer than batchSize messages were fetched, we reached the end
+                if (messages.size < batchSize) break;
             }
 
-            message.reply(`✅ Sync complete! Scanned ${fetchedCount} messages, uploaded ${uploadedCount} new videos.`);
+            await message.reply(`✅ Sync complete! Scanned ${fetchedCount} messages, uploaded ${uploadedCount} new videos.`);
         } catch (err) {
             console.error('Error during sync:', err);
             message.reply('❌ Sync failed due to an error.');
