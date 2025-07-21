@@ -86,7 +86,7 @@ client.on('messageCreate', async (message) => {
 
         // Save video
         await db.query(`
-            INSERT INTO videos (server_id, activity_name, file_url, image_owner)
+            INSERT INTO videos (server_id, activity_name, file_url, video_owner)
             VALUES ($1, $2, $3, $4)
         `, [serverDbId, activityName, fileUrl, message.author.username]);
 
